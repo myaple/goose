@@ -4,15 +4,16 @@ use crate::model::ModelConfig;
 use crate::providers::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage};
 use crate::providers::formats::google::{create_request, get_usage, response_to_message};
 use crate::providers::utils::{
-    emit_debug_trace, handle_response_google_compat, unescape_json_values,
+    build_http_client_with_mtls, // Added
+    emit_debug_trace,
+    handle_response_google_compat,
+    unescape_json_values,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use mcp_core::tool::Tool;
-use reqwest::{Certificate, Client, Identity};
+use reqwest::Client;
 use serde_json::Value;
-use std::fs::File;
-use std::io::Read;
 use std::time::Duration;
 use url::Url;
 
@@ -52,52 +53,9 @@ impl GoogleProvider {
         let host: String = config
             .get_param("GOOGLE_HOST")
             .unwrap_or_else(|_| GOOGLE_API_HOST.to_string());
+        let timeout_secs: u64 = config.get_param("GOOGLE_TIMEOUT").unwrap_or(600);
 
-        let mut client_builder = Client::builder().timeout(Duration::from_secs(600));
-
-        // Load client certificate and key
-        if let (Ok(cert_path), Ok(key_path)) = (
-            config.get_param::<String>("GOOGLE_CLIENT_CERTIFICATE_PATH"),
-            config.get_param::<String>("GOOGLE_CLIENT_KEY_PATH"),
-        ) {
-            if !cert_path.is_empty() && !key_path.is_empty() {
-                let mut cert_buf = Vec::new();
-                File::open(&cert_path)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to open certificate file {}: {}", cert_path, e)
-                    })?
-                    .read_to_end(&mut cert_buf)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to read certificate file {}: {}", cert_path, e)
-                    })?;
-                let mut key_buf = Vec::new();
-                File::open(&key_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open key file {}: {}", key_path, e))?
-                    .read_to_end(&mut key_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to read key file {}: {}", key_path, e))?;
-                let identity = Identity::from_pem(&[&cert_buf, &key_buf].concat())
-                    .map_err(|e| anyhow::anyhow!("Failed to create identity from PEM: {}", e))?;
-                client_builder = client_builder.identity(identity);
-            }
-        }
-
-        // Load CA certificate
-        if let Ok(ca_path) = config.get_param::<String>("GOOGLE_CERTIFICATE_AUTHORITY_PATH") {
-            if !ca_path.is_empty() {
-                let mut ca_buf = Vec::new();
-                File::open(&ca_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open CA file {}: {}", ca_path, e))?
-                    .read_to_end(&mut ca_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to read CA file {}: {}", ca_path, e))?;
-                let ca_cert = Certificate::from_pem(&ca_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to create CA certificate from PEM: {}", e))?;
-                client_builder = client_builder.add_root_certificate(ca_cert);
-            }
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))?;
+        let client = build_http_client_with_mtls(&config, "GOOGLE", timeout_secs)?;
 
         Ok(Self {
             client,

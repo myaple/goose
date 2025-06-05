@@ -1,18 +1,22 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use reqwest::{Certificate, Client, Identity};
+use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
-use std::fs::File;
-use std::io::Read;
-use std::time::Duration;
+use std::time::Duration; // Keep Duration if timeout_secs is derived
 use tokio::time::sleep;
 
 use super::azureauth::AzureAuth;
 use super::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
 use super::errors::ProviderError;
 use super::formats::openai::{create_request, get_usage, response_to_message};
-use super::utils::{emit_debug_trace, get_model, handle_response_openai_compat, ImageFormat};
+use super::utils::{
+    build_http_client_with_mtls, // Added
+    emit_debug_trace,
+    get_model,
+    handle_response_openai_compat,
+    ImageFormat,
+};
 use crate::message::Message;
 use crate::model::ModelConfig;
 use mcp_core::tool::Tool;
@@ -72,52 +76,11 @@ impl AzureProvider {
         // Try to get API key first, if not found use Azure credential chain
         let api_key = config.get_secret("AZURE_OPENAI_API_KEY").ok();
         let auth = AzureAuth::new(api_key)?;
+        // Use AZURE_OPENAI_TIMEOUT if available, else default 600
+        let timeout_secs: u64 = config.get_param("AZURE_OPENAI_TIMEOUT").unwrap_or(600);
 
-        let mut client_builder = Client::builder().timeout(Duration::from_secs(600));
 
-        // Load client certificate and key
-        if let (Ok(cert_path), Ok(key_path)) = (
-            config.get_param::<String>("AZURE_CLIENT_CERTIFICATE_PATH"),
-            config.get_param::<String>("AZURE_CLIENT_KEY_PATH"),
-        ) {
-            if !cert_path.is_empty() && !key_path.is_empty() {
-                let mut cert_buf = Vec::new();
-                File::open(&cert_path)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to open certificate file {}: {}", cert_path, e)
-                    })?
-                    .read_to_end(&mut cert_buf)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to read certificate file {}: {}", cert_path, e)
-                    })?;
-                let mut key_buf = Vec::new();
-                File::open(&key_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open key file {}: {}", key_path, e))?
-                    .read_to_end(&mut key_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to read key file {}: {}", key_path, e))?;
-                let identity = Identity::from_pem(&[&cert_buf, &key_buf].concat())
-                    .map_err(|e| anyhow::anyhow!("Failed to create identity from PEM: {}", e))?;
-                client_builder = client_builder.identity(identity);
-            }
-        }
-
-        // Load CA certificate
-        if let Ok(ca_path) = config.get_param::<String>("AZURE_CERTIFICATE_AUTHORITY_PATH") {
-            if !ca_path.is_empty() {
-                let mut ca_buf = Vec::new();
-                File::open(&ca_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open CA file {}: {}", ca_path, e))?
-                    .read_to_end(&mut ca_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to read CA file {}: {}", ca_path, e))?;
-                let ca_cert = Certificate::from_pem(&ca_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to create CA certificate from PEM: {}", e))?;
-                client_builder = client_builder.add_root_certificate(ca_cert);
-            }
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))?;
+        let client = build_http_client_with_mtls(&config, "AZURE_OPENAI", timeout_secs)?;
 
         Ok(Self {
             client,

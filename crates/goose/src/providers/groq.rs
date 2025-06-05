@@ -3,15 +3,13 @@ use crate::message::Message;
 use crate::model::ModelConfig;
 use crate::providers::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
 use crate::providers::formats::openai::{create_request, get_usage, response_to_message};
-use crate::providers::utils::get_model;
+use crate::providers::utils::{build_http_client_with_mtls, get_model}; // Added
 use anyhow::Result;
 use async_trait::async_trait;
 use mcp_core::Tool;
-use reqwest::{Certificate, Client, Identity, StatusCode};
+use reqwest::{Client, StatusCode};
 use serde_json::Value;
-use std::fs::File;
-use std::io::Read;
-use std::time::Duration;
+// Removed std::time::Duration
 use url::Url;
 
 pub const GROQ_API_HOST: &str = "https://api.groq.com";
@@ -43,52 +41,9 @@ impl GroqProvider {
         let host: String = config
             .get_param("GROQ_HOST")
             .unwrap_or_else(|_| GROQ_API_HOST.to_string());
+        let timeout_secs: u64 = config.get_param("GROQ_TIMEOUT").unwrap_or(600);
 
-        let mut client_builder = Client::builder().timeout(Duration::from_secs(600));
-
-        // Load client certificate and key
-        if let (Ok(cert_path), Ok(key_path)) = (
-            config.get_param::<String>("GROQ_CLIENT_CERTIFICATE_PATH"),
-            config.get_param::<String>("GROQ_CLIENT_KEY_PATH"),
-        ) {
-            if !cert_path.is_empty() && !key_path.is_empty() {
-                let mut cert_buf = Vec::new();
-                File::open(&cert_path)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to open certificate file {}: {}", cert_path, e)
-                    })?
-                    .read_to_end(&mut cert_buf)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to read certificate file {}: {}", cert_path, e)
-                    })?;
-                let mut key_buf = Vec::new();
-                File::open(&key_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open key file {}: {}", key_path, e))?
-                    .read_to_end(&mut key_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to read key file {}: {}", key_path, e))?;
-                let identity = Identity::from_pem(&[&cert_buf, &key_buf].concat())
-                    .map_err(|e| anyhow::anyhow!("Failed to create identity from PEM: {}", e))?;
-                client_builder = client_builder.identity(identity);
-            }
-        }
-
-        // Load CA certificate
-        if let Ok(ca_path) = config.get_param::<String>("GROQ_CERTIFICATE_AUTHORITY_PATH") {
-            if !ca_path.is_empty() {
-                let mut ca_buf = Vec::new();
-                File::open(&ca_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open CA file {}: {}", ca_path, e))?
-                    .read_to_end(&mut ca_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to read CA file {}: {}", ca_path, e))?;
-                let ca_cert = Certificate::from_pem(&ca_buf)
-                    .map_err(|e| anyhow::anyhow!("Failed to create CA certificate from PEM: {}", e))?;
-                client_builder = client_builder.add_root_certificate(ca_cert);
-            }
-        }
-
-        let client = client_builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))?;
+        let client = build_http_client_with_mtls(&config, "GROQ", timeout_secs)?;
 
         Ok(Self {
             client,

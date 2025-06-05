@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -8,9 +6,7 @@ use async_trait::async_trait;
 use aws_sdk_bedrockruntime::config::ProvideCredentials;
 use aws_sdk_bedrockruntime::operation::converse::ConverseError;
 use aws_sdk_bedrockruntime::{types as bedrock, Client};
-use aws_smithy_client::hyper_ext::Adapter;
 use mcp_core::Tool;
-use reqwest::{Certificate, Identity};
 use serde_json::Value;
 use tokio::time::sleep;
 
@@ -59,66 +55,7 @@ impl BedrockProvider {
         set_aws_env_vars(config.load_values());
         set_aws_env_vars(config.load_secrets());
 
-        let mut client_builder = reqwest::Client::builder().timeout(Duration::from_secs(600)); // Default timeout
-
-        // Load client certificate and key for Bedrock
-        if let (Ok(cert_path), Ok(key_path)) = (
-            config.get_param::<String>("BEDROCK_CLIENT_CERTIFICATE_PATH"),
-            config.get_param::<String>("BEDROCK_CLIENT_KEY_PATH"),
-        ) {
-            if !cert_path.is_empty() && !key_path.is_empty() {
-                let mut cert_buf = Vec::new();
-                File::open(&cert_path)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to open Bedrock certificate file {}: {}", cert_path, e)
-                    })?
-                    .read_to_end(&mut cert_buf)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to read Bedrock certificate file {}: {}", cert_path, e)
-                    })?;
-                let mut key_buf = Vec::new();
-                File::open(&key_path)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to open Bedrock key file {}: {}", key_path, e)
-                    })?
-                    .read_to_end(&mut key_buf)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to read Bedrock key file {}: {}", key_path, e)
-                    })?;
-                let identity = Identity::from_pem(&[&cert_buf, &key_buf].concat())
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to create Bedrock identity from PEM: {}", e)
-                    })?;
-                client_builder = client_builder.identity(identity);
-            }
-        }
-
-        // Load CA certificate for Bedrock
-        if let Ok(ca_path) = config.get_param::<String>("BEDROCK_CERTIFICATE_AUTHORITY_PATH") {
-            if !ca_path.is_empty() {
-                let mut ca_buf = Vec::new();
-                File::open(&ca_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to open Bedrock CA file {}: {}", ca_path, e))?
-                    .read_to_end(&mut ca_buf)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to read Bedrock CA file {}: {}", ca_path, e)
-                    })?;
-                let ca_cert = Certificate::from_pem(&ca_buf).map_err(|e| {
-                    anyhow::anyhow!("Failed to create Bedrock CA certificate from PEM: {}", e)
-                })?;
-                client_builder = client_builder.add_root_certificate(ca_cert);
-            }
-        }
-
-        let http_client = client_builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client for Bedrock: {}", e))?;
-
-        let sdk_config = futures::executor::block_on(
-            aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .http_connector(Adapter::builder().build(http_client))
-                .load_from_env(),
-        );
+        let sdk_config = futures::executor::block_on(aws_config::load_from_env());
 
         // validate credentials or return error back up
         futures::executor::block_on(

@@ -7,11 +7,15 @@ use regex::Regex;
 use reqwest::{Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_value, json, Map, Value};
+use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::providers::errors::{OpenAIError, ProviderError};
+use reqwest::{Certificate, Identity};
 use mcp_core::content::ImageContent;
+use crate::config::base::Config; // Added for Config struct
 
 #[derive(serde::Deserialize)]
 struct OpenAIErrorResponse {
@@ -333,6 +337,91 @@ pub fn emit_debug_trace(
         output_tokens = ?usage.output_tokens.unwrap_or_default(),
         total_tokens = ?usage.total_tokens.unwrap_or_default(),
     );
+}
+
+// New function as requested
+pub fn build_http_client_with_mtls(
+    config: &Config,
+    provider_prefix: &str,
+    timeout_secs: u64,
+) -> Result<reqwest::Client, anyhow::Error> {
+    let cert_path_key = format!("{}_CLIENT_CERTIFICATE_PATH", provider_prefix.to_uppercase());
+    let key_path_key = format!("{}_CLIENT_KEY_PATH", provider_prefix.to_uppercase());
+    let ca_path_key = format!("{}_CERTIFICATE_AUTHORITY_PATH", provider_prefix.to_uppercase());
+
+    // Use .ok() to convert Result<String, ConfigError> to Option<String>
+    // If get_param returns Err (e.g. key not found), it becomes None.
+    let client_cert_path: Option<String> = config.get_param(&cert_path_key).ok();
+    let client_key_path: Option<String> = config.get_param(&key_path_key).ok();
+    let ca_cert_path: Option<String> = config.get_param(&ca_path_key).ok();
+
+    // Call the existing function that takes Option<String> for paths
+    build_http_client(
+        client_cert_path,
+        client_key_path,
+        ca_cert_path,
+        timeout_secs,
+    )
+}
+
+pub fn build_http_client(
+    client_cert_path: Option<String>,
+    client_key_path: Option<String>,
+    ca_cert_path: Option<String>,
+    timeout_secs: u64,
+) -> Result<reqwest::Client, anyhow::Error> {
+    let mut client_builder = reqwest::Client::builder().timeout(Duration::from_secs(timeout_secs));
+
+    // Logic to load client identity (certificate and key)
+    if let (Some(cert_path), Some(key_path)) = (client_cert_path, client_key_path) {
+        if !cert_path.is_empty() && !key_path.is_empty() {
+            let mut cert_buf = Vec::new();
+            File::open(&cert_path)
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to open client certificate file '{}': {}", cert_path, e)
+                })?
+                .read_to_end(&mut cert_buf)
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to read client certificate file '{}': {}", cert_path, e)
+                })?;
+
+            let mut key_buf = Vec::new();
+            File::open(&key_path)
+                .map_err(|e| anyhow::anyhow!("Failed to open client key file '{}': {}", key_path, e))?
+                .read_to_end(&mut key_buf)
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to read client key file '{}': {}", key_path, e)
+                })?;
+
+            let mut pem_bytes = cert_buf; // cert_buf is Vec<u8>
+            pem_bytes.extend_from_slice(&key_buf);
+            let identity = Identity::from_pem(&pem_bytes)
+                .map_err(|e| anyhow::anyhow!("Failed to create identity from PEM: {}", e))?;
+            client_builder = client_builder.identity(identity);
+        }
+    }
+
+    // Logic to load CA certificate
+    if let Some(ca_path) = ca_cert_path {
+        if !ca_path.is_empty() {
+            let mut ca_buf = Vec::new();
+            File::open(&ca_path)
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to open CA certificate file '{}': {}", ca_path, e)
+                })?
+                .read_to_end(&mut ca_buf)
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to read CA certificate file '{}': {}", ca_path, e)
+                })?;
+            let ca_cert = Certificate::from_pem(&ca_buf)
+                .map_err(|e| anyhow::anyhow!("Failed to create CA certificate from PEM: {}", e))?;
+            client_builder = client_builder.add_root_certificate(ca_cert);
+        }
+    }
+
+    client_builder
+        .build()
+        .map_err(anyhow::Error::from) // Convert reqwest::Error to anyhow::Error
 }
 
 #[cfg(test)]
