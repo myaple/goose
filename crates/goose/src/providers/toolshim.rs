@@ -39,8 +39,10 @@ use crate::providers::formats::openai::create_request;
 use anyhow::Result;
 use mcp_core::tool::{Tool, ToolCall};
 use mcp_core::Content;
-use reqwest::Client;
+use reqwest::{Certificate, Client, Identity};
 use serde_json::{json, Value};
+use std::fs::File;
+use std::io::Read;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -69,10 +71,86 @@ pub struct OllamaInterpreter {
 
 impl OllamaInterpreter {
     pub fn new() -> Result<Self, ProviderError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(600))
-            .build()
-            .expect("Failed to create HTTP client");
+        let config = crate::config::Config::global(); // Ensure config is loaded for mTLS paths
+        let mut client_builder = Client::builder().timeout(Duration::from_secs(600));
+
+        // Load client certificate and key using OLLAMA_ prefix
+        if let (Ok(cert_path), Ok(key_path)) = (
+            config.get_param::<String>("OLLAMA_CLIENT_CERTIFICATE_PATH"),
+            config.get_param::<String>("OLLAMA_CLIENT_KEY_PATH"),
+        ) {
+            if !cert_path.is_empty() && !key_path.is_empty() {
+                let mut cert_buf = Vec::new();
+                File::open(&cert_path)
+                    .map_err(|e| {
+                        ProviderError::ConfigError(format!(
+                            "Failed to open OLLAMA certificate file {}: {}",
+                            cert_path, e
+                        ))
+                    })?
+                    .read_to_end(&mut cert_buf)
+                    .map_err(|e| {
+                        ProviderError::ConfigError(format!(
+                            "Failed to read OLLAMA certificate file {}: {}",
+                            cert_path, e
+                        ))
+                    })?;
+                let mut key_buf = Vec::new();
+                File::open(&key_path)
+                    .map_err(|e| {
+                        ProviderError::ConfigError(format!(
+                            "Failed to open OLLAMA key file {}: {}",
+                            key_path, e
+                        ))
+                    })?
+                    .read_to_end(&mut key_buf)
+                    .map_err(|e| {
+                        ProviderError::ConfigError(format!(
+                            "Failed to read OLLAMA key file {}: {}",
+                            key_path, e
+                        ))
+                    })?;
+                let identity = Identity::from_pem(&[&cert_buf, &key_buf].concat()).map_err(|e| {
+                    ProviderError::ConfigError(format!(
+                        "Failed to create OLLAMA identity from PEM: {}",
+                        e
+                    ))
+                })?;
+                client_builder = client_builder.identity(identity);
+            }
+        }
+
+        // Load CA certificate using OLLAMA_ prefix
+        if let Ok(ca_path) = config.get_param::<String>("OLLAMA_CERTIFICATE_AUTHORITY_PATH") {
+            if !ca_path.is_empty() {
+                let mut ca_buf = Vec::new();
+                File::open(&ca_path)
+                    .map_err(|e| {
+                        ProviderError::ConfigError(format!(
+                            "Failed to open OLLAMA CA file {}: {}",
+                            ca_path, e
+                        ))
+                    })?
+                    .read_to_end(&mut ca_buf)
+                    .map_err(|e| {
+                        ProviderError::ConfigError(format!(
+                            "Failed to read OLLAMA CA file {}: {}",
+                            ca_path, e
+                        ))
+                    })?;
+                let ca_cert = Certificate::from_pem(&ca_buf).map_err(|e| {
+                    ProviderError::ConfigError(format!(
+                        "Failed to create OLLAMA CA certificate from PEM: {}",
+                        e
+                    ))
+                })?;
+                client_builder = client_builder.add_root_certificate(ca_cert);
+            }
+        }
+
+        let client = client_builder.build().map_err(|e| {
+            ProviderError::ConfigError(format!("Failed to build HTTP client for ToolShim: {}", e))
+        })?;
 
         let base_url = Self::get_ollama_base_url()?;
 
@@ -81,7 +159,7 @@ impl OllamaInterpreter {
 
     /// Get the Ollama base URL from existing config or use default values
     fn get_ollama_base_url() -> Result<String, ProviderError> {
-        let config = crate::config::Config::global();
+        let config = crate::config::Config::global(); // Already loaded in new(), but called here too.
         let host: String = config
             .get_param("OLLAMA_HOST")
             .unwrap_or_else(|_| OLLAMA_HOST.to_string());

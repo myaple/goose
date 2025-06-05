@@ -1,8 +1,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{Certificate, Client, Identity};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
 use std::time::Duration;
 
 use super::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
@@ -65,9 +67,52 @@ impl OpenAiProvider {
             .ok()
             .map(parse_custom_headers);
         let timeout_secs: u64 = config.get_param("OPENAI_TIMEOUT").unwrap_or(600);
-        let client = Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .build()?;
+
+        let mut client_builder = Client::builder().timeout(Duration::from_secs(timeout_secs));
+
+        // Load client certificate and key
+        if let (Ok(cert_path), Ok(key_path)) = (
+            config.get_param::<String>("OPENAI_CLIENT_CERTIFICATE_PATH"),
+            config.get_param::<String>("OPENAI_CLIENT_KEY_PATH"),
+        ) {
+            if !cert_path.is_empty() && !key_path.is_empty() {
+                let mut cert_buf = Vec::new();
+                File::open(&cert_path)
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to open certificate file {}: {}", cert_path, e)
+                    })?
+                    .read_to_end(&mut cert_buf)
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to read certificate file {}: {}", cert_path, e)
+                    })?;
+                let mut key_buf = Vec::new();
+                File::open(&key_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to open key file {}: {}", key_path, e))?
+                    .read_to_end(&mut key_buf)
+                    .map_err(|e| anyhow::anyhow!("Failed to read key file {}: {}", key_path, e))?;
+                let identity = Identity::from_pem(&[&cert_buf, &key_buf].concat())
+                    .map_err(|e| anyhow::anyhow!("Failed to create identity from PEM: {}", e))?;
+                client_builder = client_builder.identity(identity);
+            }
+        }
+
+        // Load CA certificate
+        if let Ok(ca_path) = config.get_param::<String>("OPENAI_CERTIFICATE_AUTHORITY_PATH") {
+            if !ca_path.is_empty() {
+                let mut ca_buf = Vec::new();
+                File::open(&ca_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to open CA file {}: {}", ca_path, e))?
+                    .read_to_end(&mut ca_buf)
+                    .map_err(|e| anyhow::anyhow!("Failed to read CA file {}: {}", ca_path, e))?;
+                let ca_cert = Certificate::from_pem(&ca_buf)
+                    .map_err(|e| anyhow::anyhow!("Failed to create CA certificate from PEM: {}", e))?;
+                client_builder = client_builder.add_root_certificate(ca_cert);
+            }
+        }
+
+        let client = client_builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))?;
 
         Ok(Self {
             client,
@@ -141,6 +186,9 @@ impl Provider for OpenAiProvider {
                 ConfigKey::new("OPENAI_PROJECT", false, false, None),
                 ConfigKey::new("OPENAI_CUSTOM_HEADERS", false, true, None),
                 ConfigKey::new("OPENAI_TIMEOUT", false, false, Some("600")),
+                ConfigKey::new("CLIENT_CERTIFICATE_PATH", false, false, None),
+                ConfigKey::new("CLIENT_KEY_PATH", false, false, None),
+                ConfigKey::new("CERTIFICATE_AUTHORITY_PATH", false, false, None),
             ],
         )
     }
@@ -293,4 +341,168 @@ impl EmbeddingCapable for OpenAiProvider {
             .map(|d| d.embedding)
             .collect())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    const DUMMY_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIDddCCArKgAwIBAgIJAJBc4gBiuUuSMA0GCSqGSIb3DQEBCwUAMGQxCzAJBgNV\nBAYTAlVTMQswCQYDVQQIDAJDQTEVMBMGA1UEBwwMTW91bnRhaW4gVmlldzESMBAG\nA1UECgwJR29vZ2xlIEluYzESMBAGA1UEAwwJZXhhbXBsZS5jb20wHhcNMjQwNzAx\nMDAwMDAwWhcNMjUwNzAxMDAwMDAwWjBkMQswCQYDVQQGEwJVUzELMAkGA1UECAwC\nQ0ExFTATBgNVBAcMDEN1cGVydGlubyBGQjESMBAGA1UECgwJR29vZ2xlIEluYzES\nMBAGA1UEAwwJZXhhbXBsZS5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK\nAoIBAQC0fPz7T6QlZtZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nCAwEAAaNTMFEwHQYDVR0OBAYEFECD4jFxD6vjY5tC+2o7q3B+A4gxMB8GA1UdIwQY\nMBaAFECD4jFxD6vjY5tC+2o7q3B+A4gxMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI\nhvcNAQELBQADggEBAIZU8oJyX0g8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7i\nWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8\nrYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC\n7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWj\nH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7g=\n-----END CERTIFICATE-----";
+    const DUMMY_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC0fPz7T6QlZtZ0\nb2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0CAwEAAQKBgQC0fPz7T6Ql\nZtZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0AoGBANf8N4gL9sDG\n7aZ1c2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nAoGBANs/9j1z+iYlZtZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0AoGAOUb/h3N+lYlZ\ntZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nAoGAcr7/8t8+kYlZtZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0AoGAJqL8z9X+kYlZ\ntZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\n-----END PRIVATE KEY-----";
+    const DUMMY_CA_PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIDdzCCAl+gAwIBAgIJAKeVqL+P6Jd+MA0GCSqGSIb3DQEBCwUAMGQxCzAJBgNV\nBAYTAlVTMQswCQYDVQQIDAJDQTEVMBMGA1UEBwwMTW91bnRhaW4gVmlldzESMBAG\nA1UECgwJR29vZ2xlIEluYzESMBAGA1UEAwwJZXhhbXBsZS5jb20wHhcNMjQwNzAx\nMDAwMDAwWhcNMjUwNzAxMDAwMDAwWjBkMQswCQYDVQQGEwJVUzELMAkGA1UECAwC\nQ0ExFTATBgNVBAcMDEN1cGVydGlubyBGQjESMBAGA1UECgwJR29vZ2xlIEluYzES\nMBAGA1UEAwwJZXhhbXBsZS5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK\nAoIBAQC0fPz7T6QlZtZ0b2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nf2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0f2Z0\nCAwEAAaNQME4wHQYDVR0OBAYEFECD4jFxD6vjY5tC+2o7q3B+A4gxMB8GA1UdIwQY\nMBaAFECD4jFxD6vjY5tC+2o7q3B+A4gxMAwGA1UdEwEB/wQCMAAwDQYJKoZIhvcN\nAQELBQADggEBAIZU8oJyX0g8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8\nrYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC\n7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWj\nH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8rYt\nC7iWjH8rYtC7iWjH8rYtC7iWjH8rYtC7iWjH8=\n-----END CERTIFICATE-----";
+
+
+    struct TestEnv {
+        _dir: tempfile::TempDir, // Keep TempDir in scope for automatic cleanup
+        cert_path: Option<String>,
+        key_path: Option<String>,
+        ca_path: Option<String>,
+    }
+
+    fn setup_test_env(use_client_cert: bool, use_client_key: bool, use_ca_cert: bool) -> TestEnv {
+        let dir = tempdir().unwrap();
+        let mut test_env = TestEnv {
+            _dir: dir,
+            cert_path: None,
+            key_path: None,
+            ca_path: None,
+        };
+
+        env::set_var("OPENAI_API_KEY", "dummy_api_key");
+
+        if use_client_cert {
+            let cert_file_path = test_env._dir.path().join("client.crt");
+            let mut cert_file = File::create(&cert_file_path).unwrap();
+            cert_file.write_all(DUMMY_CERT_PEM.as_bytes()).unwrap();
+            let path_str = cert_file_path.to_str().unwrap().to_string();
+            env::set_var("OPENAI_CLIENT_CERTIFICATE_PATH", &path_str);
+            test_env.cert_path = Some(path_str);
+        } else {
+            env::remove_var("OPENAI_CLIENT_CERTIFICATE_PATH");
+        }
+
+        if use_client_key {
+            let key_file_path = test_env._dir.path().join("client.key");
+            let mut key_file = File::create(&key_file_path).unwrap();
+            key_file.write_all(DUMMY_KEY_PEM.as_bytes()).unwrap();
+            let path_str = key_file_path.to_str().unwrap().to_string();
+            env::set_var("OPENAI_CLIENT_KEY_PATH", &path_str);
+            test_env.key_path = Some(path_str);
+        } else {
+            env::remove_var("OPENAI_CLIENT_KEY_PATH");
+        }
+
+        if use_ca_cert {
+            let ca_file_path = test_env._dir.path().join("ca.crt");
+            let mut ca_file = File::create(&ca_file_path).unwrap();
+            ca_file.write_all(DUMMY_CA_PEM.as_bytes()).unwrap();
+            let path_str = ca_file_path.to_str().unwrap().to_string();
+            env::set_var("OPENAI_CERTIFICATE_AUTHORITY_PATH", &path_str);
+            test_env.ca_path = Some(path_str);
+        } else {
+            env::remove_var("OPENAI_CERTIFICATE_AUTHORITY_PATH");
+        }
+        test_env
+    }
+
+    fn default_model_config() -> ModelConfig {
+        ModelConfig::new("gpt-4o".to_string())
+    }
+
+    #[test]
+    fn test_mtls_client_cert_and_key_valid_paths() {
+        let _env = setup_test_env(true, true, false);
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn test_mtls_ca_cert_valid_path() {
+        let _env = setup_test_env(false, false, true);
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn test_mtls_all_params_valid_paths() {
+        let _env = setup_test_env(true, true, true);
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn test_mtls_client_cert_invalid_path() {
+        let _env = setup_test_env(false, true, false); // No cert file created
+        env::set_var("OPENAI_CLIENT_CERTIFICATE_PATH", "/non/existent/cert.crt");
+        // Key path is set by setup_test_env but cert is not, then explicitly set to invalid
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_err());
+        if let Err(e) = provider {
+            assert!(e.to_string().contains("Failed to open certificate file"));
+        }
+    }
+
+    #[test]
+    fn test_mtls_client_key_invalid_path() {
+        let _env = setup_test_env(true, false, false); // No key file created
+        env::set_var("OPENAI_CLIENT_KEY_PATH", "/non/existent/key.key");
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_err());
+        if let Err(e) = provider {
+            assert!(e.to_string().contains("Failed to open key file"));
+        }
+    }
+
+    #[test]
+    fn test_mtls_ca_cert_invalid_path() {
+        let _env = setup_test_env(false, false, false); // No CA file created
+        env::set_var("OPENAI_CERTIFICATE_AUTHORITY_PATH", "/non/existent/ca.crt");
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_err());
+        if let Err(e) = provider {
+            assert!(e.to_string().contains("Failed to open CA file"));
+        }
+    }
+
+    #[test]
+    fn test_mtls_client_cert_empty_path_key_present() {
+        // If cert path is empty but key path is present, it should not attempt to load identity.
+        let _env = setup_test_env(false, true, false);
+        env::set_var("OPENAI_CLIENT_CERTIFICATE_PATH", "");
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok()); // Should be Ok, as empty path skips loading identity
+    }
+
+    #[test]
+    fn test_mtls_client_key_empty_path_cert_present() {
+        // If key path is empty but cert path is present, it should not attempt to load identity.
+        let _env = setup_test_env(true, false, false);
+        env::set_var("OPENAI_CLIENT_KEY_PATH", "");
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok()); // Should be Ok, as empty path skips loading identity
+    }
+
+    #[test]
+    fn test_mtls_client_cert_and_key_both_empty_paths() {
+        let _env = setup_test_env(false, false, false);
+        env::set_var("OPENAI_CLIENT_CERTIFICATE_PATH", "");
+        env::set_var("OPENAI_CLIENT_KEY_PATH", "");
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn test_mtls_ca_cert_empty_path() {
+        let _env = setup_test_env(false, false, false);
+        env::set_var("OPENAI_CERTIFICATE_AUTHORITY_PATH", "");
+        let provider = OpenAiProvider::from_env(default_model_config());
+        assert!(provider.is_ok()); // Should be Ok, as empty path skips loading CA
+    }
+
+    // Teardown: env vars are typically isolated between tests by the test runner.
+    // If not, manual env::remove_var would be needed in each test or a custom test harness.
 }

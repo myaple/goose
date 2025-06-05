@@ -80,11 +80,6 @@ export default function DefaultProviderSetupForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Filter parameters to only show required ones
-  const requiredParameters = useMemo(() => {
-    return parameters.filter((param) => param.required === true);
-  }, [parameters]);
-
   // Helper function to generate appropriate placeholder text
   const getPlaceholder = (parameter: ConfigKey): string => {
     // If default is defined and not null, show it
@@ -100,17 +95,25 @@ export default function DefaultProviderSetupForm({
     return <div className="text-center py-4">Loading configuration values...</div>;
   }
 
-  console.log('required params', requiredParameters);
+  // Use all parameters for rendering, not just required ones.
+  // The 'required' property on the parameter can be used for form validation if needed,
+  // but all configurable parameters should be displayed.
   return (
     <div className="mt-4 space-y-4">
-      {requiredParameters.length === 0 ? (
+      {parameters.length === 0 ? (
         <div className="text-center text-gray-500">
-          No required configuration for this provider.
+          No configuration available for this provider.
         </div>
       ) : (
-        requiredParameters.map((parameter) => (
+        parameters.map((parameter) => (
           <div key={parameter.name}>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{parameter.name}</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {parameter.name
+                .split('_')
+                .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ')}
+              {parameter.required && <span className="text-red-500 ml-1">*</span>}
+            </label>
             <Input
               type={parameter.secret ? 'password' : 'text'}
               value={configValues[parameter.name] || ''}
@@ -126,8 +129,11 @@ export default function DefaultProviderSetupForm({
                   ? 'border-2 border-red-500'
                   : 'border border-gray-300'
               } bg-white text-lg placeholder:text-gray-400 font-regular text-gray-900`}
-              required={true}
+              required={parameter.required} // Set required attribute based on parameter
             />
+            {validationErrors[parameter.name] && (
+              <p className="text-sm text-red-500 mt-1">{validationErrors[parameter.name]}</p>
+            )}
           </div>
         ))
       )}

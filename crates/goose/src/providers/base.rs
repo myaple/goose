@@ -100,6 +100,9 @@ pub struct ConfigKey {
     pub required: bool,
     pub secret: bool,
     pub default: Option<String>,
+    pub client_certificate_path: Option<String>,
+    pub client_key_path: Option<String>,
+    pub certificate_authority_path: Option<String>,
 }
 
 impl ConfigKey {
@@ -109,6 +112,9 @@ impl ConfigKey {
             required,
             secret,
             default: default.map(|s| s.to_string()),
+            client_certificate_path: None,
+            client_key_path: None,
+            certificate_authority_path: None,
         }
     }
 }
