@@ -2,9 +2,14 @@
 FROM registry.access.redhat.com/ubi9/ubi as builder
 
 # Install dependencies required for Rust building
-RUN dnf module enable -y rust:1.87 && \
-    dnf install -y rust cargo gcc make libdbus-devel && \
-    dnf clean all
+# Install protobuf-compiler dependencies and build from source
+RUN dnf install -y --allowerasing libxcb-devel rust cargo gcc gcc-c++ make dbus git autoconf automake libtool curl unzip && dnf clean all
+
+# Download and install protobuf-compiler
+RUN curl -L https://github.com/protocolbuffers/protobuf/releases/download/v25.3/protoc-25.3-linux-x86_64.zip -o protoc.zip \
+    && unzip protoc.zip -d /usr/local \
+    && rm protoc.zip
+
 
 WORKDIR /usr/src/goose
 
@@ -12,7 +17,7 @@ WORKDIR /usr/src/goose
 COPY . .
 
 # Build release binary
-RUN cargo build --release
+RUN cargo build --release --bin=goose
 
 
 # Runtime stage: UBI 9 minimal with required runtime libs
@@ -22,12 +27,10 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal
 RUN microdnf install -y \
     dbus \
     dbus-daemon \
-    gnome-keyring \
     openssl-libs \
     libsecret \
     libxcb \
     ca-certificates \
-    curl \
     && microdnf clean all
 
 # Copy built goose binary from builder
