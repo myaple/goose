@@ -7,7 +7,7 @@ mod prompt;
 mod thinking;
 
 pub use self::export::message_to_markdown;
-pub use builder::{build_session, SessionBuilderConfig};
+pub use builder::{build_session, SessionBuilderConfig, SessionSettings};
 use console::Color;
 use goose::agents::AgentEvent;
 use goose::permission::permission_confirmation::PrincipalType;
@@ -891,7 +891,11 @@ impl Session {
                                                     v.to_string()
                                             },
                                         };
-                                        progress_bars.log(&message);
+                                        if interactive {
+                                            output::set_thinking_message(&message);
+                                        } else {
+                                            progress_bars.log(&message);
+                                        }
                                     },
                                     "notifications/progress" => {
                                         let progress = o.get("progress").and_then(|v| v.as_f64());
