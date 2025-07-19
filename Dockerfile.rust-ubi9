@@ -3,13 +3,19 @@ FROM registry.access.redhat.com/ubi9/ubi as builder
 
 # Install dependencies required for Rust building
 # Install protobuf-compiler dependencies and build from source
-RUN dnf install -y --allowerasing libxcb-devel rust cargo gcc gcc-c++ make dbus git autoconf automake libtool curl unzip && dnf clean all
+RUN dnf install -y --allowerasing libxcb-devel gcc gcc-c++ make dbus git autoconf automake libtool curl unzip && dnf clean all
 
 # Download and install protobuf-compiler
 RUN curl -L https://github.com/protocolbuffers/protobuf/releases/download/v25.3/protoc-25.3-linux-x86_64.zip -o protoc.zip \
     && unzip protoc.zip -d /usr/local \
     && rm protoc.zip
 
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y && \
+    source $HOME/.cargo/env
+
+ENV CARGO_HOME=/root/.cargo
+ENV PATH=/root/.cargo/bin:${PATH}
 
 WORKDIR /usr/src/goose
 
