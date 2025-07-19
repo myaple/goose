@@ -3,12 +3,11 @@ use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
 
 use super::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage};
 use super::errors::ProviderError;
 use super::formats::snowflake::{create_request, get_usage, response_to_message};
-use super::utils::{get_model, ImageFormat};
+use super::utils::{build_http_client, get_model, ImageFormat};
 use crate::config::ConfigError;
 use crate::impl_provider_default;
 use crate::message::Message;
@@ -82,9 +81,7 @@ impl SnowflakeProvider {
             .into());
         }
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(600))
-            .build()?;
+        let client = build_http_client(600, None)?;
 
         // Use token-based authentication
         let api_key = token?;

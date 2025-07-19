@@ -2,13 +2,12 @@ use anyhow::{Error, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::time::Duration;
 
 use super::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
 use super::errors::ProviderError;
 use super::utils::{
-    emit_debug_trace, get_model, handle_response_google_compat, handle_response_openai_compat,
-    is_google_model,
+    build_http_client, emit_debug_trace, get_model, handle_response_google_compat,
+    handle_response_openai_compat, is_google_model,
 };
 use crate::impl_provider_default;
 use crate::message::Message;
@@ -51,9 +50,7 @@ impl OpenRouterProvider {
             .get_param("OPENROUTER_HOST")
             .unwrap_or_else(|_| "https://openrouter.ai".to_string());
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(600))
-            .build()?;
+        let client = build_http_client(600, None)?;
 
         Ok(Self {
             client,
