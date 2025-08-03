@@ -244,7 +244,7 @@ impl AdcCredentials {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("Metadata-Flavor", "Google".parse().unwrap());
 
-        let client = build_http_client(600, Some(headers))
+        let client = build_http_client(None, Some(headers))
             .map_err(|e| AuthError::Credentials(format!("Failed to build HTTP client: {}", e)))?;
         let metadata_path = "/computeMetadata/v1/instance/service-accounts/default/token";
 
@@ -358,7 +358,7 @@ impl GcpAuth {
     /// # Returns
     /// * `Result<Self, AuthError>` - A new GcpAuth instance or an error if initialization fails
     pub async fn new() -> Result<Self, AuthError> {
-        let client = build_http_client(600, None)
+        let client = build_http_client(None, None)
             .map_err(|e| AuthError::Credentials(format!("Failed to build HTTP client: {}", e)))?;
         Ok(Self {
             credentials: AdcCredentials::load().await?,

@@ -71,7 +71,7 @@ impl AzureProvider {
             .filter(|key: &String| !key.is_empty());
         let auth = AzureAuth::new(api_key)?;
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
 
         Ok(Self {
             client,

@@ -42,7 +42,7 @@ impl GroqProvider {
             .get_param("GROQ_HOST")
             .unwrap_or_else(|_| GROQ_API_HOST.to_string());
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
 
         Ok(Self {
             client,

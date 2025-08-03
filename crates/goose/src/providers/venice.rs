@@ -100,7 +100,7 @@ impl VeniceProvider {
         // Ensure we only keep the bare model id internally
         model.model_name = strip_flags(&model.model_name).to_string();
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
 
         let instance = Self {
             client,

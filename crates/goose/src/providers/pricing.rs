@@ -264,7 +264,7 @@ pub struct OpenRouterModelsResponse {
 
 /// Internal function to fetch pricing data
 async fn fetch_openrouter_pricing_internal() -> Result<HashMap<String, OpenRouterModel>> {
-    let client = build_http_client(30, None)?;
+    let client = build_http_client(None, None)?;
     let response = client
         .get("https://openrouter.ai/api/v1/models")
         .send()

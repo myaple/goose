@@ -56,7 +56,7 @@ impl AnthropicProvider {
             .get_param("ANTHROPIC_HOST")
             .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
 
-        let client = super::utils::build_http_client(600, None)?;
+        let client = super::utils::build_http_client(None, None)?;
 
         Ok(Self {
             client,

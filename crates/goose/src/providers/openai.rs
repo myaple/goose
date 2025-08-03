@@ -70,7 +70,7 @@ impl OpenAiProvider {
             .or_else(|_| config.get_param("OPENAI_CUSTOM_HEADERS"))
             .ok()
             .and_then(|s| parse_custom_headers(s).ok());
-        let timeout_secs: u64 = config.get_param("OPENAI_TIMEOUT").unwrap_or(600);
+        let timeout_secs: Option<u64> = config.get_param("OPENAI_TIMEOUT").ok();
 
         let client = build_http_client(timeout_secs, custom_headers)?;
 
@@ -126,7 +126,7 @@ impl Provider for OpenAiProvider {
                 ConfigKey::new("OPENAI_ORGANIZATION", false, false, None),
                 ConfigKey::new("OPENAI_PROJECT", false, false, None),
                 ConfigKey::new("OPENAI_CUSTOM_HEADERS", false, true, None),
-                ConfigKey::new("OPENAI_TIMEOUT", false, false, Some("600")),
+                ConfigKey::new("OPENAI_TIMEOUT", false, false, None),
             ],
         )
     }

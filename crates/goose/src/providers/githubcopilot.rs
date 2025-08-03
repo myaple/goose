@@ -120,7 +120,7 @@ impl_provider_default!(GithubCopilotProvider);
 
 impl GithubCopilotProvider {
     pub fn from_env(model: ModelConfig) -> Result<Self> {
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
         let cache = DiskCache::new();
         let mu = tokio::sync::Mutex::new(RefCell::new(None));
         Ok(Self {

@@ -99,7 +99,7 @@ async fn get_workspace_endpoints(host: &str) -> Result<OidcEndpoints> {
         .join("oidc/.well-known/oauth-authorization-server")
         .expect("Invalid OIDC URL");
 
-    let client = build_http_client(600, None)?;
+    let client = build_http_client(None, None)?;
     let resp = client.get(oidc_url.clone()).send().await?;
 
     if !resp.status().is_success() {
@@ -243,7 +243,7 @@ impl OAuthFlow {
             ("client_id", &self.client_id),
         ];
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
         let resp = client
             .post(&self.endpoints.token_endpoint)
             .header("Content-Type", "application/x-www-form-urlencoded")
@@ -272,7 +272,7 @@ impl OAuthFlow {
 
         tracing::debug!("Refreshing token using refresh_token");
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
         let resp = client
             .post(&self.endpoints.token_endpoint)
             .header("Content-Type", "application/x-www-form-urlencoded")

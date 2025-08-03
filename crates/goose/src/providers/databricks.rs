@@ -36,7 +36,7 @@ const DEFAULT_REDIRECT_URL: &str = "http://localhost:8020";
 const DEFAULT_SCOPES: &[&str] = &["all-apis", "offline_access"];
 
 /// Default timeout for API requests in seconds
-const DEFAULT_TIMEOUT_SECS: u64 = 600;
+
 /// Default initial interval for retry (in milliseconds)
 const DEFAULT_INITIAL_RETRY_INTERVAL_MS: u64 = 5000;
 /// Default maximum number of retries
@@ -165,7 +165,7 @@ impl DatabricksProvider {
 
         let host = host?;
 
-        let client = build_http_client(DEFAULT_TIMEOUT_SECS, None)?;
+        let client = build_http_client(None, None)?;
 
         // Load optional retry configuration from environment
         let retry_config = Self::load_retry_config(config);
@@ -238,7 +238,7 @@ impl DatabricksProvider {
     ///
     /// Returns a Result containing the new DatabricksProvider instance
     pub fn from_params(host: String, api_key: String, model: ModelConfig) -> Result<Self> {
-        let client = build_http_client(DEFAULT_TIMEOUT_SECS, None)?;
+        let client = build_http_client(None, None)?;
 
         Ok(Self {
             client,

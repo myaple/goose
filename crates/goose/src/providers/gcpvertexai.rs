@@ -27,7 +27,6 @@ use rmcp::model::Tool;
 /// Base URL for GCP Vertex AI documentation
 const GCP_VERTEX_AI_DOC_URL: &str = "https://cloud.google.com/vertex-ai";
 /// Default timeout for API requests in seconds
-const DEFAULT_TIMEOUT_SECS: u64 = 600;
 /// Default initial interval for retry (in milliseconds)
 const DEFAULT_INITIAL_RETRY_INTERVAL_MS: u64 = 5000;
 /// Default maximum number of retries
@@ -171,7 +170,7 @@ impl GcpVertexAIProvider {
         let location = Self::determine_location(config)?;
         let host = format!("https://{}-aiplatform.googleapis.com", location);
 
-        let client = super::utils::build_http_client(DEFAULT_TIMEOUT_SECS, None)?;
+        let client = super::utils::build_http_client(None, None)?;
 
         let auth = GcpAuth::new().await?;
 

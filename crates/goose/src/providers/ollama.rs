@@ -40,7 +40,7 @@ impl OllamaProvider {
             .get_param("OLLAMA_HOST")
             .unwrap_or_else(|_| OLLAMA_HOST.to_string());
 
-        let timeout: u64 = config.get_param("OLLAMA_TIMEOUT").unwrap_or(OLLAMA_TIMEOUT);
+        let timeout: Option<u64> = config.get_param("OLLAMA_TIMEOUT").ok();
 
         let client = build_http_client(timeout, None)?;
 
@@ -105,12 +105,7 @@ impl Provider for OllamaProvider {
             OLLAMA_DOC_URL,
             vec![
                 ConfigKey::new("OLLAMA_HOST", true, false, Some(OLLAMA_HOST)),
-                ConfigKey::new(
-                    "OLLAMA_TIMEOUT",
-                    false,
-                    false,
-                    Some(&(OLLAMA_TIMEOUT.to_string())),
-                ),
+                ConfigKey::new("OLLAMA_TIMEOUT", false, false, None),
             ],
         )
     }

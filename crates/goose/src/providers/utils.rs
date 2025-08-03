@@ -35,10 +35,19 @@ pub struct MutualTlsConfig {
 }
 
 /// Build a reqwest client with optional mutual TLS configuration
-pub fn build_http_client(timeout_secs: u64, default_headers: Option<HeaderMap>) -> Result<Client> {
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(timeout_secs));
-
+pub fn build_http_client(
+    timeout_secs: Option<u64>,
+    default_headers: Option<HeaderMap>,
+) -> Result<Client> {
     let config = crate::config::Config::global();
+
+    let default_timeout: u64 = config
+        .get_param("GOOSE_PROVIDER_REQUEST_TIMEOUT")
+        .unwrap_or(600);
+    let actual_timeout = timeout_secs.unwrap_or(default_timeout);
+
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(actual_timeout));
+
     let client_cert_path: Option<String> = config.get_param("TLS_CERT_FILE").ok();
     let client_key_path: Option<String> = config.get_param("TLS_KEY_FILE").ok();
     let ca_cert_path: Option<String> = config.get_param("TLS_CA_FILE").ok();
@@ -780,7 +789,7 @@ mod tests {
 
     #[test]
     fn test_build_http_client_without_headers() {
-        let client = build_http_client(30, None);
+        let client = build_http_client(Some(30), None);
         assert!(client.is_ok());
     }
 
@@ -789,7 +798,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("CONTENT_TYPE", "application/json".parse().unwrap());
 
-        let client = build_http_client(30, Some(headers));
+        let client = build_http_client(Some(30), Some(headers));
         assert!(client.is_ok());
     }
 

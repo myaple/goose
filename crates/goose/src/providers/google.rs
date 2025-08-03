@@ -71,7 +71,7 @@ impl GoogleProvider {
         headers.insert("CONTENT_TYPE", "application/json".parse()?);
         headers.insert("x-goog-api-key", api_key.parse()?);
 
-        let client = build_http_client(600, Some(headers))?;
+        let client = build_http_client(None, Some(headers))?;
 
         Ok(Self {
             client,

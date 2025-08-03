@@ -48,7 +48,7 @@ impl LiteLLMProvider {
             .or_else(|_| config.get_param("LITELLM_CUSTOM_HEADERS"))
             .ok()
             .and_then(|s| parse_custom_headers(s).ok());
-        let timeout_secs: u64 = config.get_param("LITELLM_TIMEOUT").unwrap_or(600);
+        let timeout_secs: Option<u64> = config.get_param("LITELLM_TIMEOUT").ok();
 
         let client = build_http_client(timeout_secs, custom_headers)?;
 
@@ -148,7 +148,7 @@ impl Provider for LiteLLMProvider {
                     Some("v1/chat/completions"),
                 ),
                 ConfigKey::new("LITELLM_CUSTOM_HEADERS", false, true, None),
-                ConfigKey::new("LITELLM_TIMEOUT", false, false, Some("600")),
+                ConfigKey::new("LITELLM_TIMEOUT", false, false, None),
             ],
         )
     }

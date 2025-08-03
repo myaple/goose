@@ -81,7 +81,7 @@ impl SnowflakeProvider {
             .into());
         }
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
 
         // Use token-based authentication
         let api_key = token?;

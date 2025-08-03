@@ -70,7 +70,7 @@ pub struct OllamaInterpreter {
 
 impl OllamaInterpreter {
     pub fn new() -> Result<Self, ProviderError> {
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
 
         let base_url = Self::get_ollama_base_url()?;
 

@@ -50,7 +50,7 @@ impl OpenRouterProvider {
             .get_param("OPENROUTER_HOST")
             .unwrap_or_else(|_| "https://openrouter.ai".to_string());
 
-        let client = build_http_client(600, None)?;
+        let client = build_http_client(None, None)?;
 
         Ok(Self {
             client,
