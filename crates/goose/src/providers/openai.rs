@@ -11,7 +11,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::io::StreamReader;
 
-use super::api_client::{ApiClient, AuthMethod};
+use super::api_client::{ApiClient, AuthMethod, TlsConfig};
 use super::base::{ConfigKey, ModelInfo, Provider, ProviderMetadata, ProviderUsage, Usage};
 use super::embedding::{EmbeddingCapable, EmbeddingRequest, EmbeddingResponse};
 use super::errors::ProviderError;
@@ -77,6 +77,11 @@ impl OpenAiProvider {
         let auth = AuthMethod::BearerToken(api_key);
         let mut api_client =
             ApiClient::with_timeout(host, auth, std::time::Duration::from_secs(timeout_secs))?;
+
+        // Apply TLS configuration if any TLS fields are configured
+        if let Some(tls_config) = TlsConfig::from_config()? {
+            api_client = api_client.with_tls_config(tls_config)?;
+        }
 
         if let Some(org) = &organization {
             api_client = api_client.with_header("OpenAI-Organization", org)?;

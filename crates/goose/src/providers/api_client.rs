@@ -46,6 +46,33 @@ impl TlsConfig {
         }
     }
 
+    pub fn from_config() -> Result<Option<Self>> {
+        let config = crate::config::Config::global();
+        let mut tls_config = TlsConfig::new();
+        let mut has_tls_config = false;
+
+        if let Ok(client_cert_path) = config.get_param::<String>("GOOSE_CLIENT_CERT_PATH") {
+            tls_config = tls_config.with_client_cert(std::path::PathBuf::from(client_cert_path));
+            has_tls_config = true;
+        }
+
+        if let Ok(client_key_path) = config.get_param::<String>("GOOSE_CLIENT_KEY_PATH") {
+            tls_config = tls_config.with_client_key(std::path::PathBuf::from(client_key_path));
+            has_tls_config = true;
+        }
+
+        if let Ok(ca_cert_path) = config.get_param::<String>("GOOSE_CA_CERT_PATH") {
+            tls_config = tls_config.with_ca_cert(std::path::PathBuf::from(ca_cert_path));
+            has_tls_config = true;
+        }
+
+        if has_tls_config {
+            Ok(Some(tls_config))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn with_client_cert(mut self, path: PathBuf) -> Self {
         self.client_cert_path = Some(path);
         self
