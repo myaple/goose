@@ -16,6 +16,7 @@ pub struct ApiClient {
     auth: AuthMethod,
     default_headers: HeaderMap,
     timeout: Duration,
+    tls_config: Option<TlsConfig>,
 }
 
 pub enum AuthMethod {
@@ -27,7 +28,6 @@ pub enum AuthMethod {
     #[allow(dead_code)]
     OAuth(OAuthConfig),
     Custom(Box<dyn AuthProvider>),
-    MutualTls(TlsConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +110,12 @@ impl TlsConfig {
     }
 }
 
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct OAuthConfig {
     pub host: String,
     pub client_id: String,
@@ -138,21 +144,6 @@ impl fmt::Debug for AuthMethod {
                 .finish(),
             AuthMethod::OAuth(_) => f.debug_tuple("OAuth").field(&"[config]").finish(),
             AuthMethod::Custom(_) => f.debug_tuple("Custom").field(&"[provider]").finish(),
-            AuthMethod::MutualTls(tls_config) => f
-                .debug_struct("MutualTls")
-                .field(
-                    "client_cert",
-                    &tls_config.client_cert_path.as_ref().map(|_| "[path]"),
-                )
-                .field(
-                    "client_key",
-                    &tls_config.client_key_path.as_ref().map(|_| "[path]"),
-                )
-                .field(
-                    "ca_cert",
-                    &tls_config.ca_cert_path.as_ref().map(|_| "[path]"),
-                )
-                .finish(),
         }
     }
 }
@@ -177,25 +168,7 @@ impl ApiClient {
     }
 
     pub fn with_timeout(host: String, auth: AuthMethod, timeout: Duration) -> Result<Self> {
-        let mut client_builder = Client::builder().timeout(timeout);
-
-        // Configure TLS if mutual TLS is specified
-        if let AuthMethod::MutualTls(tls_config) = &auth {
-            if tls_config.is_configured() {
-                // Load client identity (certificate + private key)
-                if let Some(identity) = tls_config.load_identity()? {
-                    client_builder = client_builder.identity(identity);
-                }
-
-                // Load CA certificates
-                let ca_certs = tls_config.load_ca_certificates()?;
-                for ca_cert in ca_certs {
-                    client_builder = client_builder.add_root_certificate(ca_cert);
-                }
-            }
-        }
-
-        let client = client_builder.build()?;
+        let client = Client::builder().timeout(timeout).build()?;
 
         Ok(Self {
             client,
@@ -203,18 +176,23 @@ impl ApiClient {
             auth,
             default_headers: HeaderMap::new(),
             timeout,
+            tls_config: None,
         })
     }
 
-    pub fn with_headers(mut self, headers: HeaderMap) -> Result<Self> {
-        self.default_headers = headers;
+    pub fn with_tls_config(mut self, tls_config: TlsConfig) -> Result<Self> {
+        self.tls_config = Some(tls_config);
+        self.rebuild_client()?;
+        Ok(self)
+    }
 
+    fn rebuild_client(&mut self) -> Result<()> {
         let mut client_builder = Client::builder()
             .timeout(self.timeout)
             .default_headers(self.default_headers.clone());
 
-        // Re-configure TLS if mutual TLS is specified
-        if let AuthMethod::MutualTls(tls_config) = &self.auth {
+        // Configure TLS if specified
+        if let Some(tls_config) = &self.tls_config {
             if tls_config.is_configured() {
                 // Load client identity (certificate + private key)
                 if let Some(identity) = tls_config.load_identity()? {
@@ -230,6 +208,12 @@ impl ApiClient {
         }
 
         self.client = client_builder.build()?;
+        Ok(())
+    }
+
+    pub fn with_headers(mut self, headers: HeaderMap) -> Result<Self> {
+        self.default_headers = headers;
+        self.rebuild_client()?;
         Ok(self)
     }
 
@@ -237,28 +221,7 @@ impl ApiClient {
         let header_name = HeaderName::from_bytes(key.as_bytes())?;
         let header_value = HeaderValue::from_str(value)?;
         self.default_headers.insert(header_name, header_value);
-
-        let mut client_builder = Client::builder()
-            .timeout(self.timeout)
-            .default_headers(self.default_headers.clone());
-
-        // Re-configure TLS if mutual TLS is specified
-        if let AuthMethod::MutualTls(tls_config) = &self.auth {
-            if tls_config.is_configured() {
-                // Load client identity (certificate + private key)
-                if let Some(identity) = tls_config.load_identity()? {
-                    client_builder = client_builder.identity(identity);
-                }
-
-                // Load CA certificates
-                let ca_certs = tls_config.load_ca_certificates()?;
-                for ca_cert in ca_certs {
-                    client_builder = client_builder.add_root_certificate(ca_cert);
-                }
-            }
-        }
-
-        self.client = client_builder.build()?;
+        self.rebuild_client()?;
         Ok(self)
     }
 
@@ -360,10 +323,6 @@ impl<'a> ApiRequestBuilder<'a> {
             AuthMethod::Custom(provider) => {
                 let (header_name, header_value) = provider.get_auth_header().await?;
                 request.header(header_name, header_value)
-            }
-            AuthMethod::MutualTls(_) => {
-                // Mutual TLS is configured at the client level, no additional headers needed
-                request
             }
         };
 
