@@ -336,3 +336,50 @@ fn parse_custom_headers(headers_str: String) -> HashMap<String, String> {
     }
     headers
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::model::ModelConfig;
+    use crate::providers::formats::openai::create_request;
+    use crate::providers::utils::ImageFormat;
+
+    #[test]
+    fn test_create_request_litellm_reasoning_effort_bug() {
+        // Reproduce the bug where a model name starting with "o" (but not an OpenAI O1/O3 model)
+        // incorrectly gets a reasoning_effort parameter added
+        let model_config = ModelConfig {
+            model_name: "open-mistral-small-3.1".to_string(),
+            context_limit: Some(4096),
+            temperature: Some(0.7),
+            max_tokens: Some(1024),
+            toolshim: false,
+            toolshim_model: None,
+        };
+
+        let request = create_request(
+            &model_config,
+            "You are a helpful assistant.",
+            &[],
+            &[],
+            &ImageFormat::OpenAi,
+        )
+        .expect("Failed to create request");
+
+        // The bug is that reasoning_effort is being added when it shouldn't be
+        // For a model like "open-mistral-small-3.1", no reasoning_effort should be present
+        let obj = request.as_object().unwrap();
+
+        // Print the entire request for debugging
+        println!("Generated request: {:#?}", obj);
+
+        // Check that reasoning_effort is NOT present in the payload
+        assert!(
+            !obj.contains_key("reasoning_effort"),
+            "reasoning_effort should not be present, but found: {:?}",
+            obj.get("reasoning_effort")
+        );
+
+        // Check that the model name is correctly passed through
+        assert_eq!(obj.get("model").unwrap(), "open-mistral-small-3.1");
+    }
+}
